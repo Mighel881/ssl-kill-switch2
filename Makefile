@@ -1,19 +1,15 @@
-ARCHS := arm64
-
-include theos/makefiles/common.mk
+include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = SSLKillSwitch2
-SSLKillSwitch2_FILES = SSLKillSwitch/SSLKillSwitch.m
 
-SSLKillSwitch2_FRAMEWORKS = Security
+$(TWEAK_NAME)_FILES = /mnt/d/codes/ssl-kill-switch2/SSLKillSwitch2.xm
+$(TWEAK_NAME)_FRAMEWORKS = Security CydiaSubstrate
 
-# Build as a Substrate Tweak
-SSLKillSwitch2_CFLAGS=-DSUBSTRATE_BUILD
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc
+$(TWEAK_NAME)_LDFLAGS = -Wl,-segalign,4000
+
+export ARCHS = armv6 armv7 armv7s arm64 arm64e
+$(TWEAK_NAME)_ARCHS = armv6 armv7 armv7s arm64 arm64e
+
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-include $(THEOS_MAKE_PATH)/aggregate.mk
-
-
-after-install::
-	# Respring the device
-	install.exec "killall -9 SpringBoard"
