@@ -3,6 +3,8 @@
 #import <dlfcn.h>
 #import <substrate.h>
 
+extern const char* __progname;
+
 #define PREFERENCE_FILE @"/private/var/mobile/Library/Preferences/com.nablac0d3.SSLKillSwitchSettings.plist"
 #define PREFERENCE_KEY @"shouldDisableCertificateValidation"
 
@@ -20,19 +22,24 @@ static inline void SSKLog(NSString *format, ...)
 static inline BOOL shouldHookFromPreference(NSString *preferenceSetting)
 {
 	@autoreleasepool {
+		//Disable in apsd, prevent this break push notification
+		if(strcmp(__progname, "apsd")==0) {
+			return NO;
+		}
 		BOOL shouldHook = NO;
 		NSDictionary* plist = [[NSDictionary alloc] initWithContentsOfFile:PREFERENCE_FILE]?:@{};
 		shouldHook = [plist[preferenceSetting]?:@YES boolValue];
 		SSKLog(@"Preference set to %d.", shouldHook);
-		// Checking if BundleId has been excluded by user
-		NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier];
-		bundleId = [bundleId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-		NSString *excludedBundleIdsString = plist[@"excludedBundleIds"]?:@"";
-		excludedBundleIdsString = [excludedBundleIdsString stringByReplacingOccurrencesOfString:@" " withString:@""];
-		NSArray *excludedBundleIds = [excludedBundleIdsString componentsSeparatedByString:@","]?:@[];
-		if ([excludedBundleIds containsObject:bundleId]) {
-			SSKLog(@"Not hooking excluded bundle: %@", bundleId);
-			shouldHook = NO;
+		if(shouldHook) {
+			NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier];
+			bundleId = [bundleId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+			NSString *excludedBundleIdsString = plist[@"excludedBundleIds"]?:@"";
+			excludedBundleIdsString = [excludedBundleIdsString stringByReplacingOccurrencesOfString:@" " withString:@""];
+			NSArray *excludedBundleIds = [excludedBundleIdsString componentsSeparatedByString:@","]?:@[];
+			if ([excludedBundleIds containsObject:bundleId]) {
+				SSKLog(@"Not hooking excluded bundle: %@", bundleId);
+				shouldHook = NO;
+			}
 		}
 		return shouldHook;
 	}
@@ -54,10 +61,10 @@ static SSLContextRef replaced_SSLCreateContext(CFAllocatorRef alloc, SSLProtocol
 {
     SSLContextRef sslContext = original_SSLCreateContext(alloc, protocolSide, connectionType);
 	
-	//SSLSetClientSideAuthenticate(sslContext, kNeverAuthenticate);	
-	//original_SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnCertRequested, true);
+	//SSLSetClientSideAuthenticate(sslContext, kNeverAuthenticate);
+	//original_SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnCertRequested, false);
 	original_SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnServerAuth, true);
-	//original_SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnClientAuth, true);
+	//original_SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnClientAuth, false);
 		
     return sslContext;
 }
@@ -98,6 +105,43 @@ static char *replaced_SSL_get_psk_identity(void *ssl)
 }
 
 
+static BOOL (*original_SecTrustEvaluateWithError)(SecTrustRef trust, CFErrorRef  _Nullable *error);
+static BOOL replaced_SecTrustEvaluateWithError(SecTrustRef trust, CFErrorRef  _Nullable *error)
+{
+	BOOL ret = original_SecTrustEvaluateWithError(trust, NULL);
+	if(error) {
+		*error = NULL;
+	}
+	
+	ret = YES;
+	
+	return ret;
+}
+
+
+
+static OSStatus (*original_SecTrustEvaluate)(SecTrustRef trust, int *result);
+static OSStatus ret_replaced_SecTrustEvaluate(SecTrustRef trust, int *result, OSStatus (*trustO)(SecTrustRef trust, int *result))
+{
+	OSStatus ret = trustO(trust, result);
+	//if(result != NULL) {
+	//	*result = 1;
+	//}
+	//ret = errSecSuccess;
+	return ret;
+}
+static OSStatus replaced_SecTrustEvaluate(SecTrustRef trust, int *result)
+{
+	return ret_replaced_SecTrustEvaluate(trust, result, original_SecTrustEvaluate);
+}
+
+static int (*original_boringssl_context_set_verify_mode)(void *ctx, int mode);
+static int replaced_boringssl_context_set_verify_mode(void *ctx, int mode)
+{
+	return 0;
+}
+
+
 
 %ctor
 {
@@ -118,10 +162,19 @@ static char *replaced_SSL_get_psk_identity(void *ssl)
 		HOOKFN(SSLHandshake)
 		HOOKFN(SSLCreateContext)
 		
+			HOOKFN(SecTrustEvaluateWithError)
+		if(NO) {
+			HOOKFN(SecTrustEvaluate)
+		}
+		
 		// libboringssl.dylib
 		HOOKFN(SSL_set_custom_verify)
 		HOOKFN(SSL_CTX_set_custom_verify)
 		HOOKFN(SSL_get_psk_identity)
+		
+		//if(NO) {
+			HOOKFN(boringssl_context_set_verify_mode)
+		//}
 	}
 }
 
