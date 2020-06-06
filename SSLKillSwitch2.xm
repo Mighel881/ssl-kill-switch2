@@ -104,45 +104,6 @@ static char *replaced_SSL_get_psk_identity(void *ssl)
     return (char *)"notarealPSKidentity";
 }
 
-
-static BOOL (*original_SecTrustEvaluateWithError)(SecTrustRef trust, CFErrorRef  _Nullable *error);
-static BOOL replaced_SecTrustEvaluateWithError(SecTrustRef trust, CFErrorRef  _Nullable *error)
-{
-	BOOL ret = original_SecTrustEvaluateWithError(trust, NULL);
-	if(error) {
-		*error = NULL;
-	}
-	
-	ret = YES;
-	
-	return ret;
-}
-
-
-
-static OSStatus (*original_SecTrustEvaluate)(SecTrustRef trust, int *result);
-static OSStatus ret_replaced_SecTrustEvaluate(SecTrustRef trust, int *result, OSStatus (*trustO)(SecTrustRef trust, int *result))
-{
-	OSStatus ret = trustO(trust, result);
-	//if(result != NULL) {
-	//	*result = 1;
-	//}
-	//ret = errSecSuccess;
-	return ret;
-}
-static OSStatus replaced_SecTrustEvaluate(SecTrustRef trust, int *result)
-{
-	return ret_replaced_SecTrustEvaluate(trust, result, original_SecTrustEvaluate);
-}
-
-static int (*original_boringssl_context_set_verify_mode)(void *ctx, int mode);
-static int replaced_boringssl_context_set_verify_mode(void *ctx, int mode)
-{
-	return 0;
-}
-
-
-
 %ctor
 {
 	if(shouldHookFromPreference(PREFERENCE_KEY)) {
@@ -162,19 +123,10 @@ static int replaced_boringssl_context_set_verify_mode(void *ctx, int mode)
 		HOOKFN(SSLHandshake)
 		HOOKFN(SSLCreateContext)
 		
-			HOOKFN(SecTrustEvaluateWithError)
-		if(NO) {
-			HOOKFN(SecTrustEvaluate)
-		}
-		
 		// libboringssl.dylib
 		HOOKFN(SSL_set_custom_verify)
 		HOOKFN(SSL_CTX_set_custom_verify)
 		HOOKFN(SSL_get_psk_identity)
-		
-		//if(NO) {
-			HOOKFN(boringssl_context_set_verify_mode)
-		//}
 	}
 }
 
